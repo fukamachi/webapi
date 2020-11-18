@@ -15,6 +15,7 @@
                 #:json-bool
                 #:from-json-bool
                 #:as-json-bool
+                #:read-json
                 #:write-json-element)
   (:import-from #:alexandria
                 #:alist-hash-table
@@ -126,14 +127,14 @@
       class)))
 
 (defgeneric decode-object (input class)
-  (:method (input class)
-    (error 'conversion-failed))
   (:method (input (class null))
     (if (typep input 'json-null)
         nil
         (error 'conversion-failed)))
   (:method (input (class symbol))
     (decode-object input (find-class class)))
+  (:method ((input string) class)
+    (decode-object (st-json:read-json input) class))
   (:method ((input st-json:jso) (class codable-class))
     (let ((mapper (slot-value class 'key-mapper)))
       (apply #'make-instance class
