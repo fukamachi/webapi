@@ -13,12 +13,16 @@
                 #:jso-alist
                 #:json-null
                 #:json-bool
-                #:from-json-bool)
+                #:from-json-bool
+                #:as-json-bool
+                #:write-json-element)
   (:import-from #:alexandria
-                #:alist-hash-table)
+                #:alist-hash-table
+                #:ensure-list)
   (:export #:codable
            #:codable-class
            #:decode-object
+           #:encode-object
            #:defcodable))
 (in-package #:webapi/codable)
 
@@ -30,7 +34,12 @@
   ((key :type (or string null)
         :initarg :key
         :initform nil
-        :accessor codable-slot-key)))
+        :accessor %codable-slot-key)))
+
+(defun codable-slot-key (slot)
+  (or (%codable-slot-key slot)
+      (let ((*print-case* :downcase))
+        (princ-to-string (c2mop:slot-definition-name slot)))))
 
 (defmethod initialize-instance :around ((class codable-slot-class) &rest rest-initargs
                                                                    &key name
@@ -61,43 +70,6 @@
 
 (define-condition conversion-failed (error) ())
 
-(defun make-slot-converter (type)
-  (if (consp type)
-      (progn
-        (assert (eq (first type) 'or))
-        (lambda (val)
-          (block nil
-            (dolist (type (rest type) (error 'conversion-failed))
-              (handler-case
-                  (return (decode-jso-as-type val type))
-                (conversion-failed ()))))))
-      (lambda (val)
-        (decode-jso-as-type val type))))
-
-(defun build-slot-mapper (class)
-  (let ((mapper (slot-value class 'key-mapper)))
-    (dolist (slot (c2mop:class-direct-slots class))
-      (let ((key (or (codable-slot-key slot)
-                     (let ((*print-case* :downcase))
-                       (princ-to-string (c2mop:slot-definition-name slot))))))
-
-        (setf (gethash key mapper)
-              (cons (first (c2mop:slot-definition-initargs slot))
-                    (make-slot-converter
-                      (or (c2mop:slot-definition-type slot) t))))))))
-
-(defmethod initialize-instance :around ((class codable-class) &rest initargs &key conc-name &allow-other-keys)
-  (let ((*conc-name* (first conc-name)))
-    (let ((class (apply #'call-next-method class initargs)))
-      (build-slot-mapper class)
-      class)))
-
-(defmethod reinitialize-instance :around ((class codable-class) &rest initargs &key conc-name &allow-other-keys)
-  (let ((*conc-name* (first conc-name)))
-    (let ((class (apply #'call-next-method class initargs)))
-      (build-slot-mapper class)
-      class)))
-
 (defun decode-jso-as-type (value type)
   (case type
     (null
@@ -119,6 +91,40 @@
     (otherwise
       (decode-object value type))))
 
+(defun make-slot-decoder (type)
+  (if (consp type)
+      (progn
+        (assert (eq (first type) 'or))
+        (lambda (val)
+          (block nil
+            (dolist (type (rest type) (error 'conversion-failed))
+              (handler-case
+                  (return (decode-jso-as-type val type))
+                (conversion-failed ()))))))
+      (lambda (val)
+        (decode-jso-as-type val type))))
+
+(defun build-slot-mapper (class)
+  (let ((mapper (slot-value class 'key-mapper)))
+    (dolist (slot (c2mop:class-direct-slots class))
+      (let ((key (codable-slot-key slot)))
+        (setf (gethash key mapper)
+              (cons (first (c2mop:slot-definition-initargs slot))
+                    (make-slot-decoder
+                      (or (c2mop:slot-definition-type slot) t))))))))
+
+(defmethod initialize-instance :around ((class codable-class) &rest initargs &key conc-name &allow-other-keys)
+  (let ((*conc-name* (first conc-name)))
+    (let ((class (apply #'call-next-method class initargs)))
+      (build-slot-mapper class)
+      class)))
+
+(defmethod reinitialize-instance :around ((class codable-class) &rest initargs &key conc-name &allow-other-keys)
+  (let ((*conc-name* (first conc-name)))
+    (let ((class (apply #'call-next-method class initargs)))
+      (build-slot-mapper class)
+      class)))
+
 (defgeneric decode-object (input class)
   (:method (input class)
     (error 'conversion-failed))
@@ -139,6 +145,43 @@
                                          (class-name class)))
                             (list init-key
                                   (funcall converter val))))))))
+
+(defmethod st-json:write-json-element ((object codable) stream)
+  (write-char #\{ stream)
+  (loop with initial = t
+        for slot in (c2mop:class-direct-slots (class-of object))
+        for slot-name = (c2mop:slot-definition-name slot)
+        for type = (ensure-list (c2mop:slot-definition-type slot))
+        if (and (typep slot 'codable-slot-class)
+                (slot-boundp object slot-name))
+        do (if initial
+               (setf initial nil)
+               (write-char #\, stream))
+           (st-json:write-json-element (codable-slot-key slot) stream)
+           (write-char #\: stream)
+           (let ((value (slot-value object slot-name)))
+             (st-json:write-json-element
+               (if (member value '(t nil) :test 'eq)
+                   (cond
+                     ((find 'boolean type)
+                      (as-json-bool value))
+                     ((find 'null type)
+                      :null)
+                     ((and (or (null type)
+                               (find t type))
+                           (null value))
+                      :null)
+                     (t value))
+                   value)
+               stream)))
+  (write-char #\} stream)
+  (values))
+
+(defgeneric encode-object (object)
+  (:method ((object t))
+    object)
+  (:method ((object codable))
+    (st-json:write-json-to-string object)))
 
 (defmacro defcodable (name superclasses slots &rest class-options)
   `(defclass ,name (codable ,@superclasses)
