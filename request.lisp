@@ -6,7 +6,8 @@
   (:import-from #:dexador)
   (:import-from #:quri)
   (:import-from #:kebab)
-  (:export #:request
+  (:export #:*keep-alive*
+           #:request
            #:request-class
            #:http-method
            #:http-uri
@@ -18,6 +19,8 @@
            #:send
            #:parse))
 (in-package #:webapi/request)
+
+(defvar *keep-alive* nil)
 
 (defun contains-class-or-subclasses (class target-classes)
   (let ((class (if (typep class 'class)
@@ -89,13 +92,14 @@
   (:method ((request request))
     '()))
 
-(defgeneric send (request)
+(defgeneric send (request &key (keep-alive *keep-alive*))
   (:method ((request request))
     (multiple-value-bind (body status headers uri)
         (dex:request (http-uri request)
                      :method (http-method request)
                      :headers (request-headers request)
-                     :content (body-parameters request))
+                     :content (body-parameters request)
+                     :keep-alive keep-alive)
       (let ((response (make-instance 'response
                                      :status status
                                      :headers headers
