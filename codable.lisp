@@ -135,10 +135,12 @@
     (decode-object input (find-class class)))
   (:method ((input string) class)
     (decode-object (st-json:read-json input) class))
-  (:method ((input st-json:jso) (class codable-class))
+  (:method ((input st-json:jso) class)
+    (decode-object (jso-alist input) class))
+  (:method ((input cons) (class codable-class))
     (let ((mapper (slot-value class 'key-mapper)))
       (apply #'make-instance class
-             (loop for (key . val) in (jso-alist input)
+             (loop for (key . val) in input
                    append (destructuring-bind (init-key . converter)
                               (or (gethash key mapper)
                                   (error "Undefined key ~S (= ~S) in ~A"
