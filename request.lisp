@@ -92,8 +92,8 @@
   (:method ((request request))
     '()))
 
-(defgeneric send (request &key (keep-alive *keep-alive*))
-  (:method ((request request))
+(defgeneric send (request &key keep-alive)
+  (:method ((request request) &key (keep-alive *keep-alive*))
     (multiple-value-bind (body status headers uri)
         (dex:request (http-uri request)
                      :method (http-method request)
