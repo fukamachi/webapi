@@ -126,6 +126,18 @@
       (build-slot-mapper class)
       class)))
 
+(defun make-codable-instance (class input)
+  (let ((mapper (slot-value class 'key-mapper)))
+    (let ((initargs (loop for (key . val) in input
+                          append (destructuring-bind (init-key . converter)
+                                     (or (gethash key mapper)
+                                         (error "Undefined key ~S (= ~S) in ~A"
+                                                key val
+                                                (class-name class)))
+                                   (list init-key
+                                         (funcall converter val))))))
+      (apply #'make-instance class initargs))))
+
 (defgeneric decode-object (input class)
   (:method (input (class null))
     (if (typep input 'json-null)
@@ -138,16 +150,7 @@
   (:method ((input st-json:jso) class)
     (decode-object (jso-alist input) class))
   (:method ((input cons) (class codable-class))
-    (let ((mapper (slot-value class 'key-mapper)))
-      (apply #'make-instance class
-             (loop for (key . val) in input
-                   append (destructuring-bind (init-key . converter)
-                              (or (gethash key mapper)
-                                  (error "Undefined key ~S (= ~S) in ~A"
-                                         key val
-                                         (class-name class)))
-                            (list init-key
-                                  (funcall converter val))))))))
+    (make-codable-instance class input)))
 
 (defmethod st-json:write-json-element ((object codable) stream)
   (write-char #\{ stream)
