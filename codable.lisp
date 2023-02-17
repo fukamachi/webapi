@@ -20,12 +20,29 @@
   (:import-from #:alexandria
                 #:alist-hash-table
                 #:ensure-list)
-  (:export #:codable
+  (:export #:undefined-key
+           #:ignore-key
+           #:codable
            #:codable-class
            #:decode-object
            #:encode-object
            #:defcodable))
 (in-package #:webapi/codable)
+
+(define-condition undefined-key (error)
+  ((name :initarg :name
+         :reader undefined-key-name)
+   (value :initarg :value
+          :reader undefined-key-value)
+   (class :initarg :class
+          :reader undefined-key-class))
+  (:report (lambda (c s)
+             (with-slots (name value class) c
+               (format s
+                       "Undefined key ~S (= ~S) in ~A"
+                       name
+                       value
+                       (class-name class))))))
 
 (defclass codable () ())
 
@@ -126,11 +143,6 @@
       (build-slot-mapper class)
       class)))
 
-(defun missing-key (key val class)
-  (error "Undefined key ~S (= ~S) in ~A"
-         key val
-         (class-name class)))
-
 (defun make-codable-instance (class input)
   (let* ((mapper (slot-value class 'key-mapper))
          (initargs (loop for (key . val) in input
@@ -140,7 +152,10 @@
                                     init-key-converter
                                   (list init-key
                                         (funcall converter val)))
-                         else do (restart-case (missing-key key val class)
+                         else do (restart-case (error 'undefined-key
+                                                      :name key
+                                                      :value val
+                                                      :class class)
                                    (ignore-key ()
                                      :report "Ignore key"
                                      nil)))))
