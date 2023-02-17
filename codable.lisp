@@ -126,17 +126,25 @@
       (build-slot-mapper class)
       class)))
 
+(defun missing-key (key val class)
+  (error "Undefined key ~S (= ~S) in ~A"
+         key val
+         (class-name class)))
+
 (defun make-codable-instance (class input)
-  (let ((mapper (slot-value class 'key-mapper)))
-    (let ((initargs (loop for (key . val) in input
-                          append (destructuring-bind (init-key . converter)
-                                     (or (gethash key mapper)
-                                         (error "Undefined key ~S (= ~S) in ~A"
-                                                key val
-                                                (class-name class)))
-                                   (list init-key
-                                         (funcall converter val))))))
-      (apply #'make-instance class initargs))))
+  (let* ((mapper (slot-value class 'key-mapper))
+         (initargs (loop for (key . val) in input
+                         for init-key-converter = (gethash key mapper)
+                         if init-key-converter
+                         append (destructuring-bind (init-key . converter)
+                                    init-key-converter
+                                  (list init-key
+                                        (funcall converter val)))
+                         else do (restart-case (missing-key key val class)
+                                   (ignore-key ()
+                                     :report "Ignore key"
+                                     nil)))))
+    (apply #'make-instance class initargs)))
 
 (defgeneric decode-object (input class)
   (:method (input (class null))
