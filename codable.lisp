@@ -21,7 +21,6 @@
                 #:alist-hash-table
                 #:ensure-list)
   (:export #:undefined-key
-           #:ignore-key
            #:codable
            #:codable-class
            #:decode-object
@@ -156,7 +155,7 @@
                                                       :name key
                                                       :value val
                                                       :class class)
-                                   (ignore-key ()
+                                   (continue ()
                                      :report "Ignore key"
                                      nil)))))
     (apply #'make-instance class initargs)))
