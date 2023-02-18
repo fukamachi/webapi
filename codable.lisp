@@ -20,12 +20,28 @@
   (:import-from #:alexandria
                 #:alist-hash-table
                 #:ensure-list)
-  (:export #:codable
+  (:export #:undefined-key
+           #:codable
            #:codable-class
            #:decode-object
            #:encode-object
            #:defcodable))
 (in-package #:webapi/codable)
+
+(define-condition undefined-key (error)
+  ((name :initarg :name
+         :reader undefined-key-name)
+   (value :initarg :value
+          :reader undefined-key-value)
+   (class :initarg :class
+          :reader undefined-key-class))
+  (:report (lambda (c s)
+             (with-slots (name value class) c
+               (format s
+                       "Undefined key ~S (= ~S) in ~A"
+                       name
+                       value
+                       (class-name class))))))
 
 (defclass codable () ())
 
@@ -126,6 +142,24 @@
       (build-slot-mapper class)
       class)))
 
+(defun make-codable-instance (class input)
+  (let* ((mapper (slot-value class 'key-mapper))
+         (initargs (loop for (key . val) in input
+                         for init-key-converter = (gethash key mapper)
+                         if init-key-converter
+                         append (destructuring-bind (init-key . converter)
+                                    init-key-converter
+                                  (list init-key
+                                        (funcall converter val)))
+                         else do (restart-case (error 'undefined-key
+                                                      :name key
+                                                      :value val
+                                                      :class class)
+                                   (continue ()
+                                     :report "Ignore key"
+                                     nil)))))
+    (apply #'make-instance class initargs)))
+
 (defgeneric decode-object (input class)
   (:method (input (class null))
     (if (typep input 'json-null)
@@ -138,16 +172,7 @@
   (:method ((input st-json:jso) class)
     (decode-object (jso-alist input) class))
   (:method ((input cons) (class codable-class))
-    (let ((mapper (slot-value class 'key-mapper)))
-      (apply #'make-instance class
-             (loop for (key . val) in input
-                   append (destructuring-bind (init-key . converter)
-                              (or (gethash key mapper)
-                                  (error "Undefined key ~S (= ~S) in ~A"
-                                         key val
-                                         (class-name class)))
-                            (list init-key
-                                  (funcall converter val))))))))
+    (make-codable-instance class input)))
 
 (defmethod st-json:write-json-element ((object codable) stream)
   (write-char #\{ stream)
